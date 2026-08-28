@@ -88,6 +88,11 @@ export function hitTestMenuRow(
 /* ── DOM helpers ─────────────────────────────────────────────────────────── */
 
 let cleanup: (() => void) | null = null;
+let lastShowAt = 0;
+
+export function getContextMenuLastShowAt(): number {
+  return lastShowAt;
+}
 
 export function getContextMenuEl(): HTMLElement | null {
   return document.getElementById('river-context-menu') as HTMLElement | null;
@@ -117,6 +122,7 @@ export function showContextMenu(opts: ShowOptions): void {
   const el = getContextMenuEl();
   if (!el) return;
   hideContextMenu();
+  lastShowAt = Date.now();
 
   el.hidden = false;
   el.setAttribute('aria-hidden', 'false');
