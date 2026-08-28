@@ -27,6 +27,7 @@ import { PerfMonitor } from './perf/Monitor';
 import { isValidStageSize } from './utils/dpr';
 import { findCodeBlockAt, type CodeBlockHit } from './view/blockHit';
 import {
+  getContextMenuLastShowAt,
   hideContextMenu,
   isContextMenuVisible,
   showContextMenu,
@@ -41,6 +42,7 @@ declare global {
       previewScroll: ScrollView;
       state: StreamState;
       perf: PerfMonitor;
+      mdAutoScroll?: boolean;
     };
   }
 }
@@ -1057,20 +1059,50 @@ function mountRiver(): void {
   // ScrollView owns wheel/touch spring physics; the Hybrid shell only needs to
   // know whether the viewport is still pinned to the bottom so the ticker can
   // decide whether to keep pinning. Also close context menu on wheel.
-  const onWheel = (): void => {
+  // Wheel over empty canvas gutters misses the content projection hit-test, so
+  // the shell also applies the delta manually when the native event was not
+  // already consumed by ScrollView (see repro5: wheel at 600,300 hit CANVAS,
+  // not [data-vecto-content], and produced zero scroll).
+  const onWheel = (e: WheelEvent): void => {
     if (isContextMenuVisible()) hideContextMenu();
-    // Let ScrollView's wheel handler run first (Scene dispatches wheel to the
-    // ScrollView entity), then sample the settled target after a microtask.
+    if (e.ctrlKey) return;
+    const maxScroll = Math.max(0, previewScroll.content.height - previewScroll.height);
+    if (maxScroll > 0 && !e.defaultPrevented) {
+      const target = e.target as HTMLElement | null;
+      const overContent = !!target?.closest?.('[data-vecto-content]');
+      const overMenu = !!target?.closest?.('#river-context-menu');
+      const overScrollbar = !!scrollbarEl?.contains(target as Node);
+      if (!overContent && !overMenu && !overScrollbar) {
+        let delta = e.deltaY ?? 0;
+        const mode = (e as WheelEvent).deltaMode ?? 0;
+        if (mode === 1) delta *= 16;
+        else if (mode === 2) delta *= previewScroll.height;
+        if (delta !== 0) {
+          const cur = -previewScroll.content.y;
+          const next = Math.max(0, Math.min(maxScroll, cur + delta));
+          if (next !== cur) {
+            previewScroll.scrollTo(next);
+            scene.markDirty();
+            e.preventDefault();
+          }
+        }
+      }
+    }
+    // Immediate update based on spring target, not live y (which lags)
+    const targetY = (previewScroll as unknown as { targetY: number }).targetY;
+    const curTarget = typeof targetY === 'number' ? -targetY : -previewScroll.content.y;
+    mdAutoScroll = curTarget >= maxScroll - 8;
     requestAnimationFrame(() => {
       mdAutoScroll = isAtBottom();
     });
   };
-  window.addEventListener('wheel', onWheel, { passive: true });
+  window.addEventListener('wheel', onWheel, { passive: false });
   // Touch drag also clears auto-follow — sample after the Scene's pointer handlers.
   const onPointerDown = (): void => {
     if (isContextMenuVisible()) {
       // Do not close here — contextMenu's own click-outside handler will close if outside.
     }
+    mdAutoScroll = isAtBottom();
     requestAnimationFrame(() => {
       mdAutoScroll = isAtBottom();
     });
@@ -1113,6 +1145,9 @@ function mountRiver(): void {
   // but also close on pointerdown that starts a drag/pointer capture)
   const onWindowPointerDownForMenu = (e: PointerEvent): void => {
     if (!isContextMenuVisible()) return;
+    // Right button will trigger contextmenu to reposition menu; don't dismiss on the same gesture.
+    if (e.button === 2 && Date.now() - getContextMenuLastShowAt() < 300) return;
+    if (e.button === 2) return;
     const menuEl = document.getElementById('river-context-menu');
     if (!menuEl) return;
     const target = e.target as Node | null;
@@ -1218,7 +1253,19 @@ function mountRiver(): void {
   syncDropzone();
 
   // ── Devtools hook — ?debug → attachDevtools(scene), window.__app ────────
-  window.__app = { scene, markdown, previewScroll, state, perf };
+  window.__app = {
+    scene,
+    markdown,
+    previewScroll,
+    state,
+    perf,
+    get mdAutoScroll() {
+      return mdAutoScroll;
+    },
+    set mdAutoScroll(v: boolean) {
+      mdAutoScroll = v;
+    },
+  };
 
   const maybeAttachDevtools = async (): Promise<void> => {
     if (!new URLSearchParams(window.location.search).has('debug')) return;
