@@ -14,13 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Checkout river-core (for file:../river-core)
-        run: git clone https://github.com/vectojs/river-core.git ../river-core
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Build river-core (for file:../river-core)
-        run: cd ../river-core && bun install && bun run build
       - run: bun install
       - run: bun run format:check
       - run: bun run lint
@@ -33,13 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Checkout river-core (for file:../river-core)
-        run: git clone https://github.com/vectojs/river-core.git ../river-core
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-      - name: Build river-core (for file:../river-core)
-        run: cd ../river-core && bun install && bun run build
       - run: bun install
       - run: bun run build
       - name: Deploy to Cloudflare Pages
