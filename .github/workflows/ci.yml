@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout river-core (for file:../river-core)
+        run: git clone https://github.com/vectojs/river-core.git ../river-core
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
@@ -29,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Checkout river-core (for file:../river-core)
+        run: git clone https://github.com/vectojs/river-core.git ../river-core
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
