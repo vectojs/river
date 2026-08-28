@@ -1,6 +1,6 @@
 # River — Streaming Markdown Reader
 
-Streaming markdown reader (LLM-typewriter) built as a VectoJS forge. Hybrid shell: traditional HTML chrome (header file/controls/rate/theme, optional 48px ribbon) wrapping a VectoJS canvas core (`#river-canvas` + `#river-a11y-root`).
+Streaming markdown reader (LLM-typewriter) built as a VectoJS forge. Hybrid shell: traditional HTML chrome (header file/controls/rate/theme, no ribbon) wrapping a VectoJS canvas core (`#river-canvas` + `#river-a11y-root`) — ribbon removed CTX-0066 (reader has no explorer, wastes 48px).
 
 - **Family**: `vectojs-native/river/` (container; each child is its own git repo: `river/`, `river-core/`, `river-docs/`).
 - **Deployed**: <https://river.vectojs.org> (Cloudflare Pages project `river` — not yet live until CTX bootstrap; local `bun run preview` on 3518).
@@ -27,7 +27,7 @@ Append `?debug` to attach `@vectojs/devtools` (`attachDevtools(scene)`) and expo
 
 ## Hybrid Shell Contract
 
-- Outer chrome is plain HTML/CSS flex (`#river-header`, `#river-ribbon`).
+- Outer chrome is plain HTML/CSS flex (`#river-header` only — `#river-ribbon` removed CTX-0066).
 - Center `#river-stage` hosts `<canvas id="river-canvas">` + `<div id="river-a11y-root">` for the VectoJS `Scene`.
 - `Scene` uses `disableWindowResize:true` + `ResizeObserver` on `#river-stage` (see `scribe/src/main.ts:671-700`): `isValidStageSize` guard → `scene.resize(w,h)` → `previewScroll` centered (max 860) → `markdown.setMaxWidth` + `scroll.updateContentSize()`. `disableWindowResize:true` mandatory; window resize owned by observer.
 - Stream ticker: `StreamTicker extends Entity` inside Scene onDemand; `hasPendingAnimations = status===streaming`; `tickStream(state, dt)` owns rate/pause; `Markdown.createStream({ incompleteMode: 'optimistic', maxBufferedChars })` handles parsing.
