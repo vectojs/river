@@ -885,6 +885,62 @@ function mountRiver(): void {
     void document.fonts.ready.then(() => layout());
   }
 
+  // ── DPR + window size auto-adapt (CTX-0070) ────────────────────────────
+  // Scene with disableWindowResize:true still watches DPR internally (Scene.watchDevicePixelRatio
+  // resizes the backing store when devicePixelRatio changes), but the shell's layout (centered
+  // column, markdown maxWidth, ScrollView placement) is CSS-driven and must re-run even when
+  // stage.clientWidth hasn't changed — e.g. dragging a window between HiDPI displays, browser
+  // zoom (90%/110%/125%) which changes devicePixelRatio, or mobile visualViewport pinch/keyboard.
+  // ResizeObserver on #river-stage covers container-driven size changes, but not DPR-only changes
+  // or window/visualViewport resizes (orientation, zoom, keyboard). Mirror scribe's DPR watch.
+  let lastDpr =
+    typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
+      ? window.devicePixelRatio
+      : 1;
+  let dprMql: MediaQueryList | null = null;
+  const onDprChange = (): void => {
+    const cur =
+      typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
+        ? window.devicePixelRatio
+        : 1;
+    if (Math.abs(cur - lastDpr) <= 0.001) {
+      armDprWatcher();
+      return;
+    }
+    lastDpr = cur;
+    layout();
+    armDprWatcher();
+  };
+  const armDprWatcher = (): void => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    if (dprMql) {
+      try {
+        dprMql.removeEventListener('change', onDprChange);
+      } catch {
+        // ignore
+      }
+    }
+    const cur =
+      typeof window !== 'undefined' && Number.isFinite(window.devicePixelRatio)
+        ? window.devicePixelRatio
+        : 1;
+    try {
+      dprMql = window.matchMedia(`(resolution: ${cur}dppx)`);
+      dprMql.addEventListener('change', onDprChange);
+    } catch {
+      dprMql = null;
+    }
+  };
+  armDprWatcher();
+
+  const onWindowResize = (): void => layout();
+  window.addEventListener('resize', onWindowResize, { passive: true });
+  window.addEventListener('orientationchange', onWindowResize as EventListener);
+  const vv = (window as unknown as { visualViewport?: VisualViewport }).visualViewport;
+  const onVisualViewportResize = (): void => layout();
+  vv?.addEventListener('resize', onVisualViewportResize);
+  vv?.addEventListener('scroll', onVisualViewportResize);
+
   // ── HTML chrome wiring — migrating gallery ControlPanel canvas paint to Hybrid header ──
   openFileBtn?.addEventListener('click', () => openFilePicker());
   dropzoneBtn?.addEventListener('click', () => openFilePicker());
@@ -1306,6 +1362,18 @@ function mountRiver(): void {
     window.removeEventListener('pointercancel', onThumbPointerUp);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('contextmenu', onContextMenu);
+    window.removeEventListener('resize', onWindowResize);
+    window.removeEventListener('orientationchange', onWindowResize as EventListener);
+    vv?.removeEventListener('resize', onVisualViewportResize);
+    vv?.removeEventListener('scroll', onVisualViewportResize);
+    if (dprMql) {
+      try {
+        dprMql.removeEventListener('change', onDprChange);
+      } catch {
+        // ignore
+      }
+      dprMql = null;
+    }
     window.removeEventListener('beforeunload', destroy);
     hideContextMenu();
     observer.disconnect();
