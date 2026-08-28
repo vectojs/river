@@ -153,6 +153,7 @@ function mountRiver(): void {
     autoThrottle: false,
     idleFPS: 60,
     renderMode: 'always',
+    a11ySyncInterval: 100,
   });
 
   const state = createStreamState();
@@ -161,6 +162,8 @@ function mountRiver(): void {
   let stream: StreamController | null = null;
   let mdAutoScroll = true;
   let lastPerfUpdate = 0;
+  let lastChromeUpdate = 0;
+  const CHROME_THROTTLE_MS = 100;
   let themeId = 'warm';
   let internalDrag = false;
   let dragOverCounter = 0;
@@ -792,7 +795,10 @@ function mountRiver(): void {
       updateScrollbar();
 
       if (state.status !== 'streaming') {
-        updateChrome();
+        if (now - lastChromeUpdate > CHROME_THROTTLE_MS) {
+          updateChrome();
+          lastChromeUpdate = now;
+        }
         return;
       }
 
@@ -849,7 +855,10 @@ function mountRiver(): void {
         scene.markDirty();
       }
 
-      updateChrome();
+      if (now - lastChromeUpdate > CHROME_THROTTLE_MS || isDone(state.status)) {
+        updateChrome();
+        lastChromeUpdate = now;
+      }
     }
 
     override hasPendingAnimations(): boolean {
