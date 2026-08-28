@@ -28,6 +28,7 @@
   "dependencies": {
     "@vectojs/core": "1.39.1",
     "@vectojs/markdown": "0.23.1",
+    "@vectojs/river-core": "file:../river-core",
     "@vectojs/styles": "0.3.3",
     "@vectojs/ui": "2.20.2",
     "marked": "^18.0.10"
