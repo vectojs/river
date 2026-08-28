@@ -11,3 +11,6 @@ node_modules/
 .worktrees/
 tmp/
 .playwright-cli/
+playwright-report/
+test-results/
+blob-report/

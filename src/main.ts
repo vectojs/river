@@ -205,7 +205,7 @@ function mountRiver(): void {
 
   function syncDropzone(): void {
     if (!dropzoneEl) return;
-    const idle = state.status === 'idle' && state.content.length === 0;
+    const idle = state.status === 'idle';
     // When idle the drop overlay is the primary affordance; when a document is
     // loaded the canvas transcript owns the stage. Mirror gallery DropZone's
     // visible flag — `is-hidden { opacity:0; pointer-events:none; }` so the
@@ -213,9 +213,11 @@ function mountRiver(): void {
     if (idle) {
       dropzoneEl.classList.remove('is-hidden');
       dropzoneEl.removeAttribute('aria-hidden');
+      dropzoneEl.tabIndex = 0;
     } else {
       dropzoneEl.classList.add('is-hidden');
       dropzoneEl.setAttribute('aria-hidden', 'true');
+      dropzoneEl.tabIndex = -1;
       // Ensure drag highlight is cleared when overlay hides
       dropzoneEl.classList.remove('is-drag-over');
       dragOverCounter = 0;
@@ -567,6 +569,10 @@ function mountRiver(): void {
       }
       case 'toggle-play':
         if (state.content && state.status !== 'streaming') {
+          if (!stream) {
+            rewindStream(state);
+            resetDocument();
+          }
           state.status = 'streaming';
           layout();
           scene.markDirty();
@@ -880,6 +886,11 @@ function mountRiver(): void {
 
   playBtn?.addEventListener('click', () => {
     if (state.content && state.status !== 'streaming') {
+      // After Clean the stream was destroyed and markdown cleared; replay needs a fresh writer.
+      if (!stream) {
+        rewindStream(state);
+        resetDocument();
+      }
       state.status = 'streaming';
       layout();
       scene.markDirty();
@@ -1171,6 +1182,10 @@ function mountRiver(): void {
       if (state.status === 'streaming') {
         state.status = 'paused';
       } else if (state.content) {
+        if (!stream) {
+          rewindStream(state);
+          resetDocument();
+        }
         state.status = 'streaming';
         layout();
       }
@@ -1231,6 +1246,7 @@ function mountRiver(): void {
     window.removeEventListener('pointercancel', onThumbPointerUp);
     window.removeEventListener('keydown', onKeyDown);
     window.removeEventListener('contextmenu', onContextMenu);
+    window.removeEventListener('beforeunload', destroy);
     hideContextMenu();
     observer.disconnect();
     releaseStream();
