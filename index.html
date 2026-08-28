@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>River — Streaming Markdown Reader</title>
+    <meta
+      name="description"
+      content="River is a streaming markdown reader: drop a .md/.txt and replay at adjustable rate with @vectojs/markdown createStream."
+    />
+    <meta name="theme-color" content="#f7f2e8" />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="https://cdn.vectojs.org/river/logo.svg"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="River — Streaming Markdown Reader" />
+    <meta
+      property="og:description"
+      content="Hybrid HTML shell + VectoJS canvas streaming markdown reader (gallery Stream Reader reference)."
+    />
+    <meta property="og:url" content="https://river.vectojs.org/" />
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --hairline: 1px;
+        --river-bg: #f7f2e8;
+        --river-pane-bg: #fffdf9;
+        --river-border: #e5ddd3;
+        --river-fg: #1a1a1a;
+        --river-muted: #6b6256;
+        --river-muted-2: #8a8175;
+        --river-accent: #3a7bd5;
+        --river-accent-bg: #eef4ff;
+        --river-ribbon-bg: #2b2b2b;
+        --river-ribbon-fg: #a8a8a8;
+        --river-ribbon-width: 48px;
+      }
+
+      @media (resolution: 2dppx) {
+        :root {
+          --hairline: 0.5px;
+        }
+      }
+      @media (resolution: 3dppx) {
+        :root {
+          --hairline: 0.33px;
+        }
+      }
+
+      html[data-theme="dark"] {
+        --river-bg: #0f1115;
+        --river-pane-bg: #1a1e24;
+        --river-border: #2a2f3a;
+        --river-fg: #e6e2de;
+        --river-muted: #9aa0a8;
+        --river-muted-2: #7a828c;
+        --river-accent: #7aa3e8;
+        --river-accent-bg: #1e2535;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--river-bg);
+        color: var(--river-fg);
+        font-family: "Inter", system-ui, sans-serif;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      /* ── Hybrid shell: flex row wrapper ── */
+      #river-root {
+        display: flex;
+        flex-direction: row;
+        width: 100%;
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      #river-ribbon {
+        width: var(--river-ribbon-width);
+        min-width: var(--river-ribbon-width);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 8px 0 10px;
+        background: var(--river-ribbon-bg);
+        border-right: var(--hairline) solid #3a3a3a;
+        flex-shrink: 0;
+        z-index: 25;
+        overflow: hidden;
+      }
+
+      #river-ribbon.is-collapsed {
+        width: 0 !important;
+        min-width: 0 !important;
+        overflow: hidden;
+        border-right-width: 0;
+      }
+
+      #river-app {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-width: 0;
+        height: 100vh;
+        height: 100dvh;
+        min-height: 0;
+      }
+
+      #river-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        height: 44px;
+        min-height: 44px;
+        padding: 0 16px;
+        padding-left: max(16px, env(safe-area-inset-left));
+        padding-right: max(16px, env(safe-area-inset-right));
+        border-bottom: var(--hairline) solid var(--river-border);
+        background: var(--river-pane-bg);
+        flex-shrink: 0;
+        z-index: 20;
+      }
+
+      #river-header h1 {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+      }
+
+      #river-header #river-file-name {
+        font-size: 13px;
+        color: var(--river-muted);
+      }
+
+      #river-header #river-save-status {
+        font-size: 12px;
+        color: var(--river-muted-2);
+        white-space: nowrap;
+      }
+
+      #river-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--river-muted);
+      }
+
+      #river-stage {
+        flex: 1;
+        min-width: 0;
+        position: relative;
+        overflow: hidden;
+        background: var(--river-bg);
+        --river-centered-max: 860px;
+        --river-centered-gutter: 24px;
+      }
+
+      #river-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+
+      #river-a11y-root {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        pointer-events: none;
+      }
+
+      #river-a11y-root [data-vecto-content] {
+        pointer-events: auto;
+        user-select: text;
+        max-width: var(--river-centered-max);
+      }
+
+      @media (max-width: 640px) {
+        #river-ribbon {
+          display: none;
+        }
+        #river-header {
+          padding: 0 12px;
+        }
+        #river-header h1 {
+          font-size: 14px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #river-ribbon {
+          transition: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="river-root">
+      <nav id="river-ribbon" aria-label="App ribbon">
+        <button
+          id="river-ribbon-files"
+          class="river-ribbon__btn"
+          aria-label="Files"
+          title="Files"
+          type="button"
+        >
+          ◧
+        </button>
+      </nav>
+      <div id="river-app">
+        <header id="river-header">
+          <h1>River</h1>
+          <span id="river-file-name">sample.md</span>
+          <span id="river-save-status">Ready</span>
+          <div id="river-controls" aria-label="Playback controls placeholder">
+            <span>Controls → CTX-0055</span>
+          </div>
+        </header>
+        <div id="river-stage">
+          <canvas id="river-canvas"></canvas>
+          <div id="river-a11y-root"></div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

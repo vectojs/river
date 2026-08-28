@@ -1,0 +1,13 @@
+dist/
+node_modules/
+.DS_Store
+*.swp
+*.swo
+*~
+.env
+.env.*
+.wrangler/
+.carryctx/config.local.toml
+.worktrees/
+tmp/
+.playwright-cli/
