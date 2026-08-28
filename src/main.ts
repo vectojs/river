@@ -147,6 +147,10 @@ function mountRiver(): void {
   const scene = new Scene(canvas, {
     disableWindowResize: true,
     maxDPR: 3,
+    maxFPS: 0,
+    autoThrottle: false,
+    idleFPS: 60,
+    renderMode: 'always',
   });
 
   const state = createStreamState();
