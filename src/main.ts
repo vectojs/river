@@ -1,4 +1,4 @@
-import { Entity, Scene } from '@vectojs/core';
+import { Entity, Scene, type IRenderer } from '@vectojs/core';
 import {
   Markdown,
   resolvePresetTheme,
@@ -10,17 +10,28 @@ import { DOCUMENT_SCROLL_PHYSICS, ScrollView } from '@vectojs/ui';
 import {
   ACCEPTED_EXTENSIONS,
   AsyncGeneration,
+  collectDocumentText,
   createStreamState,
+  findMatches,
   isAcceptedFile,
   loadFile,
   rewindStream,
   tickStream,
   tokenize,
+  type DocText,
+  type SearchMatch,
   type StreamState,
 } from '@vectojs/river-core';
 
 import { PerfMonitor } from './perf/Monitor';
 import { isValidStageSize } from './utils/dpr';
+import { findCodeBlockAt, type CodeBlockHit } from './view/blockHit';
+import {
+  hideContextMenu,
+  isContextMenuVisible,
+  showContextMenu,
+  type ContextMenuItem,
+} from './view/contextMenu';
 
 declare global {
   interface Window {
@@ -68,6 +79,33 @@ const PERF_REFRESH_MS = 500;
 const OUTER_PAD = 16;
 const CENTERED_MAX_WIDTH = 860;
 
+/* ── Search highlight — canvas Entity that scrolls with the document ────────
+ * Ported from gallery StreamReader MatchHighlight (index.ts:122). Lives as a
+ * child of `markdown` so its y scrolls with the document. Uses IRenderer (not
+ * RawRenderer) so it stays backend-agnostic.
+ */
+class MatchHighlight extends Entity {
+  constructor() {
+    super('MatchHighlight');
+    this.interactive = false;
+    this.opacity = 0;
+  }
+
+  override isPointInside(): boolean {
+    return false;
+  }
+
+  override render(r: IRenderer): void {
+    r.beginPath();
+    r.roundRect(0, 0, this.width, this.height, 4);
+    r.fill('rgba(255, 196, 48, 0.28)');
+  }
+}
+
+/* ── Scrollbar constants (gallery ScrollBar.ts parity) ────────────────────── */
+const SCROLLBAR_PAD = 4;
+const SCROLLBAR_MIN_THUMB = 32;
+
 function mountRiver(): void {
   const canvas = document.getElementById('river-canvas') as HTMLCanvasElement | null;
   const stage = document.getElementById('river-stage') as HTMLElement | null;
@@ -90,6 +128,20 @@ function mountRiver(): void {
   const fileNameEl = document.getElementById('river-file-name') as HTMLElement | null;
   const saveStatusEl = document.getElementById('river-save-status') as HTMLElement | null;
 
+  // Search bar HTML elements (Hybrid, not canvas)
+  const searchBarEl = document.getElementById('river-searchbar') as HTMLElement | null;
+  const searchInputEl = document.getElementById('river-search-input') as HTMLInputElement | null;
+  const searchCountEl = document.getElementById('river-search-count') as HTMLElement | null;
+  const searchPrevBtn = document.getElementById('river-search-prev') as HTMLButtonElement | null;
+  const searchNextBtn = document.getElementById('river-search-next') as HTMLButtonElement | null;
+  const searchCloseBtn = document.getElementById('river-search-close') as HTMLButtonElement | null;
+
+  // Scrollbar HTML elements
+  const scrollbarEl = document.getElementById('river-scrollbar') as HTMLElement | null;
+  const scrollbarThumbEl = scrollbarEl?.querySelector(
+    '.river-scrollbar__thumb',
+  ) as HTMLElement | null;
+
   if (!canvas || !stage) throw new Error('River requires #river-canvas and #river-stage');
 
   const scene = new Scene(canvas, {
@@ -105,6 +157,12 @@ function mountRiver(): void {
   let lastPerfUpdate = 0;
   let themeId = 'warm';
   let internalDrag = false;
+  let dragOverCounter = 0;
+
+  // Scrollbar drag state (HTML thumb)
+  let thumbDragging = false;
+  let thumbStartClientY = 0;
+  let thumbStartScroll = 0;
 
   const markdown = new Markdown('', {
     maxWidth: 640,
@@ -119,6 +177,14 @@ function mountRiver(): void {
       // ignore
     }
   };
+
+  // Search state — mirrors gallery StreamReader search fields
+  let searchMatches: SearchMatch[] = [];
+  let searchCurrent = -1;
+  let searchIndexDirty = true;
+  let searchIndex: DocText | null = null;
+  const searchHighlight = new MatchHighlight();
+  markdown.add(searchHighlight);
 
   const previewScroll = new ScrollView({
     width: 400,
@@ -150,6 +216,9 @@ function mountRiver(): void {
     } else {
       dropzoneEl.classList.add('is-hidden');
       dropzoneEl.setAttribute('aria-hidden', 'true');
+      // Ensure drag highlight is cleared when overlay hides
+      dropzoneEl.classList.remove('is-drag-over');
+      dragOverCounter = 0;
     }
     if (dropzoneHint) {
       if (state.fileName && state.status === 'idle') {
@@ -160,6 +229,40 @@ function mountRiver(): void {
         dropzoneHint.textContent = state.fileName || 'Streaming…';
       }
     }
+  }
+
+  function updateScrollbar(): void {
+    if (!scrollbarEl || !scrollbarThumbEl) return;
+    const viewH = previewScroll.height;
+    const contentH = previewScroll.content.height || markdown.height || 0;
+    const scrollY = -(previewScroll.content.y ?? 0);
+    const maxScroll = Math.max(0, contentH - viewH);
+    if (contentH <= viewH || viewH <= 0 || maxScroll <= 0) {
+      scrollbarEl.classList.add('is-hidden');
+      scrollbarEl.hidden = true;
+      scrollbarEl.setAttribute('aria-hidden', 'true');
+      return;
+    }
+    scrollbarEl.classList.remove('is-hidden');
+    scrollbarEl.hidden = false;
+    scrollbarEl.removeAttribute('aria-hidden');
+    const track = viewH - SCROLLBAR_PAD * 2;
+    const thumbH = Math.max(SCROLLBAR_MIN_THUMB, (viewH / contentH) * track);
+    const trackTravel = Math.max(1, viewH - SCROLLBAR_PAD * 2 - thumbH);
+    const thumbY =
+      SCROLLBAR_PAD + (Math.max(0, Math.min(scrollY, maxScroll)) / maxScroll) * trackTravel;
+    scrollbarThumbEl.style.height = `${Math.round(thumbH)}px`;
+    scrollbarThumbEl.style.top = `${Math.round(thumbY)}px`;
+  }
+
+  function thumbDragToScroll(deltaClientY: number): number {
+    const viewH = previewScroll.height;
+    const contentH = previewScroll.content.height || markdown.height || 0;
+    const maxScroll = Math.max(0, contentH - viewH);
+    const track = viewH - SCROLLBAR_PAD * 2;
+    const thumbH = Math.max(SCROLLBAR_MIN_THUMB, (viewH / contentH) * track);
+    const trackTravel = Math.max(1, viewH - SCROLLBAR_PAD * 2 - thumbH);
+    return thumbStartScroll + (deltaClientY / trackTravel) * maxScroll;
   }
 
   function updateChrome(): void {
@@ -207,6 +310,7 @@ function mountRiver(): void {
     if (stopBtn) stopBtn.disabled = !state.content && state.status === 'idle';
     if (themePicker && themePicker.value !== themeId) themePicker.value = themeId;
     syncDropzone();
+    updateScrollbar();
   }
 
   /**
@@ -254,6 +358,234 @@ function mountRiver(): void {
       maxBufferedChars: Math.max(MIN_BUFFERED_CHARS, state.content.length),
     });
     mdAutoScroll = true;
+    clearSearchState();
+  }
+
+  /* ── Search helpers (gallery parity) ───────────────────────────────────── */
+
+  function rebuildSearchIndex(): void {
+    searchIndex = collectDocumentText(markdown);
+    searchIndexDirty = false;
+  }
+
+  function isDocumentShown(): boolean {
+    return state.status !== 'idle' && state.content.length > 0;
+  }
+
+  function updateSearchCountUI(): void {
+    if (!searchCountEl) return;
+    const q = searchInputEl?.value.trim() ?? '';
+    if (q === '') {
+      searchCountEl.textContent = '';
+      return;
+    }
+    if (searchMatches.length === 0) {
+      searchCountEl.textContent = '0 / 0';
+    } else {
+      searchCountEl.textContent = `${searchCurrent + 1} / ${searchMatches.length}`;
+    }
+  }
+
+  function scrollToMatch(index: number): void {
+    const m = searchMatches[index];
+    if (!m) {
+      searchHighlight.opacity = 0;
+      scene.markDirty();
+      return;
+    }
+    const viewportH = previewScroll.height;
+    const contentH = previewScroll.content.height || markdown.height || 0;
+    const maxScroll = Math.max(0, contentH - viewportH);
+    // Center the match line in the viewport (gallery: m.y + DOC_INSET - viewportH/2)
+    // River has no DOC_INSET inside content; m.y is markdown-local, so center via:
+    const target = Math.max(0, Math.min(maxScroll, m.y - viewportH / 2 + (m.height ?? 20) / 2));
+    previewScroll.scrollTo(target);
+    // Highlight geometry is markdown-local, so it scrolls with the document
+    searchHighlight.y = m.y - 2;
+    searchHighlight.height = (m.height ?? 20) + 4;
+    searchHighlight.width = Math.max(100, markdown.width || 640);
+    searchHighlight.opacity = 1;
+    scene.markDirty();
+  }
+
+  function openSearch(): void {
+    if (!isDocumentShown() || !searchBarEl || !searchInputEl) return;
+    searchBarEl.classList.remove('is-hidden');
+    searchBarEl.removeAttribute('aria-hidden');
+    searchBarEl.hidden = false;
+    // Ensure search input is focused for IME
+    requestAnimationFrame(() => searchInputEl.focus());
+    if (searchIndexDirty) rebuildSearchIndex();
+    const q = searchInputEl.value;
+    searchMatches = searchIndex ? findMatches(searchIndex, q) : [];
+    searchCurrent = searchMatches.length > 0 ? 0 : -1;
+    updateSearchCountUI();
+    if (searchInputEl.value.trim() !== '' || searchMatches.length > 0) {
+      scrollToMatch(searchCurrent);
+    } else {
+      searchHighlight.opacity = 0;
+    }
+    scene.markDirty();
+  }
+
+  function closeSearch(): void {
+    if (!searchBarEl) return;
+    searchBarEl.classList.add('is-hidden');
+    searchBarEl.setAttribute('aria-hidden', 'true');
+    // Use hidden for parity with scrollbar but keep pointerEvents none via is-hidden CSS;
+    // do not set hidden attribute that would defeat display:none vs is-hidden toggle —
+    // searchbar uses is-hidden class, but also set hidden for a11y.
+    searchHighlight.opacity = 0;
+    scene.markDirty();
+    // Return focus to stage so Esc doesn't re-blur input immediately
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  }
+
+  function clearSearchState(): void {
+    if (searchInputEl) searchInputEl.value = '';
+    searchIndex = null;
+    searchIndexDirty = true;
+    searchMatches = [];
+    searchCurrent = -1;
+    searchHighlight.opacity = 0;
+    updateSearchCountUI();
+    if (searchBarEl) {
+      searchBarEl.classList.add('is-hidden');
+      searchBarEl.setAttribute('aria-hidden', 'true');
+    }
+  }
+
+  function onSearchQuery(query: string): void {
+    if (searchIndexDirty) rebuildSearchIndex();
+    searchMatches = searchIndex ? findMatches(searchIndex, query) : [];
+    searchCurrent = searchMatches.length > 0 ? 0 : -1;
+    updateSearchCountUI();
+    scrollToMatch(searchCurrent);
+  }
+
+  function stepSearch(delta: number): void {
+    if (searchIndexDirty) {
+      rebuildSearchIndex();
+      const idx = searchIndex;
+      searchMatches = idx ? findMatches(idx, searchInputEl?.value ?? '') : [];
+      if (searchMatches.length === 0) {
+        searchCurrent = -1;
+        updateSearchCountUI();
+        searchHighlight.opacity = 0;
+        scene.markDirty();
+        return;
+      }
+      // Clamp current if it was -1 or out of range
+      if (searchCurrent < 0 || searchCurrent >= searchMatches.length) searchCurrent = 0;
+    }
+    if (searchMatches.length === 0) {
+      updateSearchCountUI();
+      return;
+    }
+    const n = searchMatches.length;
+    searchCurrent = (searchCurrent + delta + n) % n;
+    updateSearchCountUI();
+    scrollToMatch(searchCurrent);
+  }
+
+  /* ── Context menu helpers ──────────────────────────────────────────────── */
+
+  function copyText(text: string): void {
+    const clipboard = navigator.clipboard;
+    if (!clipboard) {
+      console.warn('[river] clipboard unavailable — copy skipped');
+      return;
+    }
+    clipboard.writeText(text).catch((error: unknown) => {
+      console.warn('[river] clipboard write rejected:', error);
+    });
+  }
+
+  function buildMenuItems(hit: CodeBlockHit | null): ContextMenuItem[] {
+    const shown = isDocumentShown();
+    const hasContent = state.content.length > 0;
+    const streaming = state.status === 'streaming';
+    const items: ContextMenuItem[] = [];
+
+    if (hit) {
+      items.push({
+        id: 'copy-code',
+        label: hit.lang ? `Copy ${hit.lang} code` : 'Copy code',
+        data: hit,
+      });
+    }
+
+    items.push({
+      id: 'search',
+      label: 'Find in document',
+      hint: 'Ctrl F',
+      disabled: !shown,
+    });
+
+    THEME_CHOICES.forEach((choice, i) => {
+      items.push({
+        id: `theme:${choice.id}`,
+        label: choice.label,
+        checked: themeId === choice.id,
+        sectionBefore: i === 0,
+      });
+    });
+
+    items.push({
+      id: 'toggle-play',
+      label: streaming ? 'Pause stream' : 'Resume stream',
+      disabled: !hasContent || streaming,
+      sectionBefore: true,
+    });
+    items.push({
+      id: 'restart',
+      label: 'Restart stream',
+      disabled: !hasContent,
+    });
+    items.push({
+      id: 'copy-source',
+      label: 'Copy source',
+      disabled: !hasContent,
+    });
+    return items;
+  }
+
+  function handleMenuSelect(id: string, data: unknown): void {
+    if (id === 'search') {
+      openSearch();
+      return;
+    }
+    if (id.startsWith('theme:')) {
+      applyTheme(id.slice('theme:'.length));
+      return;
+    }
+    switch (id) {
+      case 'copy-code': {
+        const hit = data as CodeBlockHit | null;
+        if (hit) copyText(hit.text);
+        break;
+      }
+      case 'toggle-play':
+        if (state.content && state.status !== 'streaming') {
+          state.status = 'streaming';
+          layout();
+          scene.markDirty();
+          updateChrome();
+        }
+        break;
+      case 'restart':
+        if (state.content) {
+          rewindStream(state);
+          resetDocument();
+          state.status = 'streaming';
+          scene.markDirty();
+          updateChrome();
+        }
+        break;
+      case 'copy-source':
+        copyText(state.tokens.slice(0, state.cursor).join('') || state.content);
+        break;
+    }
   }
 
   async function openFile(file: File): Promise<void> {
@@ -296,6 +628,8 @@ function mountRiver(): void {
         : 'Markdown · plain text';
     }
     mdAutoScroll = true;
+    clearSearchState();
+    hideContextMenu();
     layout();
     scene.markDirty();
     updateChrome();
@@ -332,6 +666,7 @@ function mountRiver(): void {
     });
 
     mdAutoScroll = status === 'streaming';
+    clearSearchState();
 
     if (status === 'done') {
       const finishing = stream;
@@ -404,6 +739,7 @@ function mountRiver(): void {
     // nothing is re-lexed.
     markdown.setMaxWidth(mdWidth);
     previewScroll.updateContentSize();
+    updateScrollbar();
     scene.markDirty();
   };
 
@@ -416,11 +752,32 @@ function mountRiver(): void {
         if (fpsEl) {
           const fps = Number.isFinite(sample.fps) ? sample.fps.toFixed(1) : '—';
           const hz = Number.isFinite(sample.displayHz) ? sample.displayHz.toFixed(0) : '—';
-          fpsEl.textContent = `FPS ${fps} · ${hz}Hz · ${sample.renderMode}`;
+          // Starvation: when rafHz falls well below displayHz, show "240←8" style
+          let hzLabel = `${hz}Hz`;
+          if (
+            Number.isFinite(sample.displayHz) &&
+            Number.isFinite(sample.rafHz) &&
+            sample.displayHz > 0
+          ) {
+            const rafStarved = 0.75;
+            if (sample.rafHz < sample.displayHz * rafStarved) {
+              hzLabel = `${Math.round(sample.displayHz)}←${Math.round(sample.rafHz)}`;
+              fpsEl.style.color = '#d97757';
+            } else {
+              fpsEl.style.color = '';
+            }
+          }
+          fpsEl.textContent = `FPS ${fps} · ${hzLabel} · ${sample.renderMode}`;
+          fpsEl.title =
+            Number.isFinite(sample.frameMs) && Number.isFinite(sample.heapUsedMB)
+              ? `frame ${sample.frameMs}ms · heap ${sample.heapUsedMB.toFixed(1)}MB`
+              : `FPS ${fps} · ${hzLabel}`;
         }
         lastPerfUpdate = now;
         scene.markDirty();
       }
+      // Poll scrollbar thumb each frame — ScrollView's spring moves content.y continuously
+      updateScrollbar();
 
       if (state.status !== 'streaming') {
         updateChrome();
@@ -447,6 +804,9 @@ function mountRiver(): void {
         stream?.write(chunk).catch((error: unknown) => {
           failStream(error);
         });
+
+        // Search index stale — rendered text grew
+        searchIndexDirty = true;
 
         if (mdAutoScroll) {
           // PreviewScroll's spring would otherwise smooth a per-tick pin and never
@@ -564,13 +924,93 @@ function mountRiver(): void {
   // Keep theme select in sync with initial warm sentinel
   if (themePicker) themePicker.value = themeId;
 
+  // ── Search bar wiring (HTML) ───────────────────────────────────────────
+  searchInputEl?.addEventListener('input', () => {
+    onSearchQuery(searchInputEl.value);
+  });
+  searchInputEl?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (e.shiftKey) stepSearch(-1);
+      else stepSearch(1);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearch();
+    }
+  });
+  searchPrevBtn?.addEventListener('click', () => stepSearch(-1));
+  searchNextBtn?.addEventListener('click', () => stepSearch(1));
+  searchCloseBtn?.addEventListener('click', () => closeSearch());
+
+  // ── Scrollbar thumb drag (HTML) ────────────────────────────────────────
+  scrollbarThumbEl?.addEventListener('pointerdown', (e) => {
+    if (!isDocumentShown()) return;
+    const contentH = previewScroll.content.height || markdown.height || 0;
+    const viewH = previewScroll.height;
+    if (contentH <= viewH) return;
+    thumbDragging = true;
+    thumbStartClientY = e.clientY;
+    thumbStartScroll = -(previewScroll.content.y ?? 0);
+    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+    e.preventDefault();
+  });
+  const onThumbPointerMove = (e: PointerEvent): void => {
+    if (!thumbDragging) return;
+    const next = thumbDragToScroll(e.clientY - thumbStartClientY);
+    previewScroll.scrollTo(next);
+    mdAutoScroll = isAtBottom();
+    scene.markDirty();
+  };
+  const onThumbPointerUp = (): void => {
+    if (!thumbDragging) return;
+    thumbDragging = false;
+    scene.markDirty();
+  };
+  window.addEventListener('pointermove', onThumbPointerMove);
+  window.addEventListener('pointerup', onThumbPointerUp);
+  window.addEventListener('pointercancel', onThumbPointerUp);
+
   // ── Drag & drop ──────────────────────────────────────────────────────────
+  const onDragEnter = (e: DragEvent): void => {
+    e.preventDefault();
+    if (internalDrag) return;
+    dragOverCounter++;
+    if (dropzoneEl && !dropzoneEl.classList.contains('is-hidden')) {
+      dropzoneEl.classList.add('is-drag-over');
+    } else if (dropzoneEl && state.content.length > 0) {
+      // When document shown, still show dropzone as drag-over hint? Keep hidden but show highlight?
+      // No — keep hidden to avoid blanket over text; drag-over highlight only when visible.
+    }
+    // Also add generic stage highlight when dragging over stage
+    stage.classList.add('is-drag-over');
+  };
   const onDragOver = (e: DragEvent): void => {
     e.preventDefault();
+    if (dropzoneEl && !internalDrag && dropzoneEl.classList.contains('is-drag-over')) {
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+    }
   };
-
+  const onDragLeave = (e: DragEvent): void => {
+    e.preventDefault();
+    if (internalDrag) return;
+    dragOverCounter = Math.max(0, dragOverCounter - 1);
+    if (dragOverCounter === 0) {
+      dropzoneEl?.classList.remove('is-drag-over');
+      stage.classList.remove('is-drag-over');
+    }
+    // Fallback: if leaving window entirely (relatedTarget null), clear
+    if (!e.relatedTarget) {
+      dragOverCounter = 0;
+      dropzoneEl?.classList.remove('is-drag-over');
+      stage.classList.remove('is-drag-over');
+    }
+  };
   const onDrop = (e: DragEvent): void => {
     e.preventDefault();
+    dragOverCounter = 0;
+    dropzoneEl?.classList.remove('is-drag-over');
+    stage.classList.remove('is-drag-over');
     if (internalDrag) {
       internalDrag = false;
       return;
@@ -591,7 +1031,9 @@ function mountRiver(): void {
     internalDrag = false;
   };
 
+  document.addEventListener('dragenter', onDragEnter);
   document.addEventListener('dragover', onDragOver);
+  document.addEventListener('dragleave', onDragLeave);
   document.addEventListener('drop', onDrop);
   document.addEventListener('dragstart', onDragStart);
   document.addEventListener('dragend', onDragEnd);
@@ -599,8 +1041,9 @@ function mountRiver(): void {
   // ── Scroll: keep auto-follow honest when the user scrolls manually ───────
   // ScrollView owns wheel/touch spring physics; the Hybrid shell only needs to
   // know whether the viewport is still pinned to the bottom so the ticker can
-  // decide whether to keep pinning.
+  // decide whether to keep pinning. Also close context menu on wheel.
   const onWheel = (): void => {
+    if (isContextMenuVisible()) hideContextMenu();
     // Let ScrollView's wheel handler run first (Scene dispatches wheel to the
     // ScrollView entity), then sample the settled target after a microtask.
     requestAnimationFrame(() => {
@@ -610,23 +1053,119 @@ function mountRiver(): void {
   window.addEventListener('wheel', onWheel, { passive: true });
   // Touch drag also clears auto-follow — sample after the Scene's pointer handlers.
   const onPointerDown = (): void => {
+    if (isContextMenuVisible()) {
+      // Do not close here — contextMenu's own click-outside handler will close if outside.
+    }
     requestAnimationFrame(() => {
       mdAutoScroll = isAtBottom();
     });
   };
   window.addEventListener('pointerdown', onPointerDown, { passive: true });
 
-  // ── Keyboard shortcuts: Space = play/pause, Esc = stop, L = toggle loop ─
+  // ── Context menu (right-click) ───────────────────────────────────────────
+  const onContextMenu = (e: MouseEvent): void => {
+    e.preventDefault();
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const worldX = e.clientX - rect.left;
+    const worldY = e.clientY - rect.top;
+    // Guard: if click is on scrollbar thumb area, let thumb own it
+    if (scrollbarEl && !scrollbarEl.hidden && !scrollbarEl.classList.contains('is-hidden')) {
+      const sbRect = scrollbarEl.getBoundingClientRect();
+      if (e.clientX >= sbRect.left && e.clientX <= sbRect.right) {
+        // If over scrollbar, don't show document menu
+        return;
+      }
+    }
+    // Hit-test code block under cursor (world coords)
+    let hit: CodeBlockHit | null = null;
+    try {
+      hit = isDocumentShown() ? findCodeBlockAt(markdown, worldX, worldY) : null;
+    } catch {
+      hit = null;
+    }
+    const items = buildMenuItems(hit);
+    showContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      items,
+      onSelect: (id, data) => handleMenuSelect(id, data),
+    });
+  };
+  window.addEventListener('contextmenu', onContextMenu);
+
+  // Close context menu on window pointerdown outside menu (scribe pattern already handles click outside,
+  // but also close on pointerdown that starts a drag/pointer capture)
+  const onWindowPointerDownForMenu = (e: PointerEvent): void => {
+    if (!isContextMenuVisible()) return;
+    const menuEl = document.getElementById('river-context-menu');
+    if (!menuEl) return;
+    const target = e.target as Node | null;
+    if (target && menuEl.contains(target)) return;
+    // Don't close if clicking scrollbar thumb (drag will handle)
+    if (scrollbarThumbEl && target && scrollbarThumbEl.contains(target as Node)) return;
+    hideContextMenu();
+  };
+  window.addEventListener('pointerdown', onWindowPointerDownForMenu);
+
+  // ── Keyboard shortcuts: Ctrl/Cmd+F = find, Space = play/pause, Esc = stop, L = toggle loop ─
   const onKeyDown = (e: KeyboardEvent): void => {
-    if (
-      (e.target as HTMLElement).tagName === 'INPUT' ||
-      (e.target as HTMLElement).tagName === 'SELECT'
-    ) {
-      if (e.code === 'Escape' && (e.target as HTMLElement).tagName === 'INPUT') {
-        (e.target as HTMLElement).blur();
+    const target = e.target as HTMLElement;
+    const isInput =
+      target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA';
+    // Esc inside search input closes search before blurring
+    if (isInput && e.code === 'Escape' && target.id === 'river-search-input') {
+      e.preventDefault();
+      e.stopPropagation();
+      closeSearch();
+      return;
+    }
+    // Ctrl/Cmd+F opens find — prevent browser's find even when input focused (except search input itself)
+    if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF') {
+      e.preventDefault();
+      if (searchBarEl && !searchBarEl.classList.contains('is-hidden')) {
+        searchInputEl?.focus();
+        searchInputEl?.select();
+      } else {
+        openSearch();
       }
       return;
     }
+    if (isInput) {
+      if (e.code === 'Escape' && target.tagName === 'INPUT') {
+        (target as HTMLElement).blur();
+      }
+      // Let input handle its own keys; but Enter in search input already handled above
+      return;
+    }
+
+    // Esc dismisses context menu before any other Esc meaning
+    if (e.code === 'Escape' && isContextMenuVisible()) {
+      hideContextMenu();
+      e.preventDefault();
+      return;
+    }
+    // Esc dismisses search before stop
+    if (e.code === 'Escape' && searchBarEl && !searchBarEl.classList.contains('is-hidden')) {
+      e.preventDefault();
+      closeSearch();
+      return;
+    }
+
+    // Enter/Shift+Enter when search open steps through matches (gallery parity: Enter next, Shift+Enter prev)
+    if (
+      searchBarEl &&
+      !searchBarEl.classList.contains('is-hidden') &&
+      e.code === 'Enter' &&
+      !e.ctrlKey &&
+      !e.metaKey
+    ) {
+      e.preventDefault();
+      if (e.shiftKey) stepSearch(-1);
+      else stepSearch(1);
+      return;
+    }
+
     if (e.code === 'Space') {
       e.preventDefault();
       if (state.status === 'streaming') {
@@ -639,9 +1178,16 @@ function mountRiver(): void {
       updateChrome();
     }
     if (e.code === 'Escape') {
+      hideContextMenu();
+      if (searchBarEl && !searchBarEl.classList.contains('is-hidden')) {
+        closeSearch();
+        return;
+      }
       stopAndClear();
     }
     if (e.code === 'KeyL') {
+      // Don't hijack when typing in search
+      if (searchBarEl && !searchBarEl.classList.contains('is-hidden')) return;
       state.loop = !state.loop;
       scene.markDirty();
       updateChrome();
@@ -671,13 +1217,21 @@ function mountRiver(): void {
   // the page, but keeping cleanup mirrors gallery StreamReader:952-974 destroy().
   const destroy = (): void => {
     asyncGen.destroy();
+    document.removeEventListener('dragenter', onDragEnter);
     document.removeEventListener('dragover', onDragOver);
+    document.removeEventListener('dragleave', onDragLeave);
     document.removeEventListener('drop', onDrop);
     document.removeEventListener('dragstart', onDragStart);
     document.removeEventListener('dragend', onDragEnd);
     window.removeEventListener('wheel', onWheel);
     window.removeEventListener('pointerdown', onPointerDown);
+    window.removeEventListener('pointerdown', onWindowPointerDownForMenu);
+    window.removeEventListener('pointermove', onThumbPointerMove);
+    window.removeEventListener('pointerup', onThumbPointerUp);
+    window.removeEventListener('pointercancel', onThumbPointerUp);
     window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('contextmenu', onContextMenu);
+    hideContextMenu();
     observer.disconnect();
     releaseStream();
     perf.destroy();
