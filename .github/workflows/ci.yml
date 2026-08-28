@@ -20,6 +20,8 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Build river-core (for file:../river-core)
+        run: cd ../river-core && bun install && bun run build
       - run: bun run format:check
       - run: bun run lint
       - run: bun run test
@@ -37,6 +39,8 @@ jobs:
         with:
           bun-version: latest
       - run: bun install
+      - name: Build river-core (for file:../river-core)
+        run: cd ../river-core && bun install && bun run build
       - run: bun run build
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
