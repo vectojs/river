@@ -33,14 +33,14 @@
 
       :root {
         --hairline: 1px;
-        --river-bg: #f7f2e8;
+        --river-bg: #f7f4ee;
         --river-pane-bg: #fffdf9;
         --river-border: #e5ddd3;
         --river-fg: #1a1a1a;
         --river-muted: #6b6256;
         --river-muted-2: #8a8175;
-        --river-accent: #3a7bd5;
-        --river-accent-bg: #eef4ff;
+        --river-accent: #d97757;
+        --river-accent-bg: #fdf0e6;
         --river-ribbon-bg: #2b2b2b;
         --river-ribbon-fg: #a8a8a8;
         --river-ribbon-width: 48px;
@@ -64,8 +64,8 @@
         --river-fg: #e6e2de;
         --river-muted: #9aa0a8;
         --river-muted-2: #7a828c;
-        --river-accent: #7aa3e8;
-        --river-accent-bg: #1e2535;
+        --river-accent: #e8a07a;
+        --river-accent-bg: #2a2520;
       }
 
       html,
@@ -112,6 +112,26 @@
         border-right-width: 0;
       }
 
+      .river-ribbon__btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--river-ribbon-fg);
+        cursor: pointer;
+        font-size: 16px;
+        line-height: 1;
+      }
+
+      .river-ribbon__btn:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #ffffff;
+      }
+
       #river-app {
         display: flex;
         flex-direction: column;
@@ -122,45 +142,194 @@
         min-height: 0;
       }
 
+      /* ── Header: gallery ControlPanel migrated to Hybrid HTML ── */
       #river-header {
         display: flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 12px;
+        gap: 8px;
+        padding: 0 12px;
         height: 44px;
         min-height: 44px;
-        padding: 0 16px;
-        padding-left: max(16px, env(safe-area-inset-left));
-        padding-right: max(16px, env(safe-area-inset-right));
         border-bottom: var(--hairline) solid var(--river-border);
         background: var(--river-pane-bg);
         flex-shrink: 0;
         z-index: 20;
+        overflow: hidden;
+      }
+
+      #river-header__left,
+      #river-header__right {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+      }
+
+      #river-header__left {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      #river-header__right {
+        flex-shrink: 0;
+        margin-left: auto;
       }
 
       #river-header h1 {
         font-size: 15px;
         font-weight: 600;
         letter-spacing: -0.02em;
+        flex-shrink: 0;
       }
 
-      #river-header #river-file-name {
-        font-size: 13px;
-        color: var(--river-muted);
-      }
-
-      #river-header #river-save-status {
+      /* Header buttons — mirror ControlPanel palette */
+      #river-header button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 28px;
+        padding: 0 10px;
+        border: var(--hairline) solid transparent;
+        border-radius: 6px;
         font-size: 12px;
-        color: var(--river-muted-2);
+        font-weight: 600;
+        font-family: system-ui, sans-serif;
+        cursor: pointer;
+        white-space: nowrap;
+        flex-shrink: 0;
+        transition:
+          background 120ms,
+          border-color 120ms,
+          opacity 120ms;
+      }
+
+      #river-header button:disabled {
+        opacity: 0.45;
+        cursor: default;
+        pointer-events: none;
+      }
+
+      #river-header button:focus-visible {
+        outline: 2px solid var(--river-accent);
+        outline-offset: 1px;
+      }
+
+      #river-open-file {
+        background: #1e293b;
+        color: #e2e8f0;
+      }
+      #river-open-file:hover {
+        background: #334155;
+      }
+      #river-play {
+        background: #064e3b;
+        color: #e2e8f0;
+      }
+      #river-play:hover {
+        background: #065f46;
+      }
+      #river-pause {
+        background: #1e3a5f;
+        color: #e2e8f0;
+      }
+      #river-pause:hover {
+        background: #1e40af;
+      }
+      #river-stop {
+        background: #475569;
+        color: #e2e8f0;
+      }
+      #river-stop:hover {
+        background: #64748b;
+      }
+      #river-loop {
+        background: #f7f2e8;
+        color: #59442c;
+        border-color: rgba(0, 0, 0, 0.08);
+      }
+      #river-loop[aria-pressed="true"] {
+        background: #59442c;
+        color: #fffdf9;
+        border-color: #59442c;
+      }
+      #river-loop:hover {
+        border-color: rgba(0, 0, 0, 0.14);
+      }
+
+      /* Rate controls — migrated from ControlPanel Slider+Input */
+      #river-rate-group {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--river-muted);
         white-space: nowrap;
       }
 
-      #river-controls {
-        display: flex;
-        align-items: center;
-        gap: 8px;
+      #river-rate {
+        width: 120px;
+        accent-color: #b4823c;
+        cursor: pointer;
+      }
+
+      #river-rate-input {
+        width: 64px;
+        height: 28px;
+        padding: 0 6px;
+        border: var(--hairline) solid var(--river-border);
+        border-radius: 6px;
+        background: var(--river-pane-bg);
+        color: var(--river-fg);
         font-size: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        text-align: right;
+      }
+
+      #river-rate-input:focus-visible {
+        outline: 2px solid var(--river-accent);
+        outline-offset: 1px;
+      }
+
+      #river-progress,
+      #river-fps,
+      #river-status {
+        font-size: 11px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         color: var(--river-muted);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      #river-progress {
+        min-width: 0;
+        flex-shrink: 1;
+        color: #5f4931;
+      }
+
+      #river-fps {
+        color: var(--river-muted-2);
+        flex-shrink: 0;
+      }
+
+      #river-theme-picker {
+        height: 28px;
+        padding: 0 8px;
+        border: var(--hairline) solid var(--river-border);
+        border-radius: 6px;
+        background: var(--river-pane-bg);
+        color: var(--river-fg);
+        font-size: 12px;
+        font-family: system-ui, sans-serif;
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+
+      #river-theme-picker:focus-visible {
+        outline: 2px solid var(--river-accent);
+        outline-offset: 1px;
       }
 
       #river-stage {
@@ -192,20 +361,218 @@
         max-width: var(--river-centered-max);
       }
 
+      /* ── Drop overlay — HTML mirror of gallery DropZone canvas card ── */
+      .river-dropzone {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10;
+        background: rgba(247, 242, 232, 0.85);
+        backdrop-filter: blur(2px);
+        -webkit-backdrop-filter: blur(2px);
+        transition:
+          opacity 160ms,
+          backdrop-filter 160ms;
+      }
+
+      html[data-theme="dark"] .river-dropzone {
+        background: rgba(15, 17, 21, 0.72);
+      }
+
+      .river-dropzone.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .river-dropzone__card {
+        width: min(520px, calc(100% - 40px));
+        padding: 32px 24px 28px;
+        background: rgba(255, 255, 255, 0.9);
+        border: 1.5px dashed #b4823c;
+        border-radius: 16px;
+        text-align: center;
+        box-shadow: 0 8px 24px rgba(61, 53, 41, 0.08);
+      }
+
+      html[data-theme="dark"] .river-dropzone__card {
+        background: rgba(26, 30, 36, 0.96);
+        border-color: #8c7a65;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+      }
+
+      .river-dropzone__icon {
+        font-size: 48px;
+        line-height: 1;
+        margin-bottom: 12px;
+      }
+
+      .river-dropzone__title {
+        font-size: 18px;
+        font-weight: 800;
+        color: #3d2e1a;
+        margin-bottom: 6px;
+        letter-spacing: -0.02em;
+      }
+
+      html[data-theme="dark"] .river-dropzone__title {
+        color: var(--river-fg);
+      }
+
+      .river-dropzone__hint {
+        font-size: 13px;
+        color: #8c7a65;
+        margin-bottom: 20px;
+      }
+
+      html[data-theme="dark"] .river-dropzone__hint {
+        color: var(--river-muted);
+      }
+
+      .river-dropzone__btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 36px;
+        padding: 0 18px;
+        border-radius: 20px;
+        border: 1px solid rgba(180, 130, 60, 0.4);
+        background: rgba(180, 130, 60, 0.08);
+        color: #9a6d30;
+        font-size: 13px;
+        font-weight: 700;
+        font-family: system-ui, sans-serif;
+        cursor: pointer;
+      }
+
+      html[data-theme="dark"] .river-dropzone__btn {
+        border-color: rgba(232, 160, 122, 0.45);
+        color: var(--river-accent);
+        background: rgba(232, 160, 122, 0.12);
+      }
+
+      .river-dropzone__btn:hover {
+        background: rgba(180, 130, 60, 0.16);
+      }
+
+      .river-dropzone__foot {
+        margin-top: 18px;
+        font-size: 11px;
+        font-family: ui-monospace, monospace;
+        color: rgba(120, 100, 75, 0.6);
+      }
+
+      /* ── Search bar — deferred to CTX-0056, hidden placeholder ── */
+      .river-searchbar {
+        position: absolute;
+        top: 12px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        width: min(560px, calc(100% - 32px));
+        padding: 6px 8px;
+        background: var(--river-pane-bg);
+        border: var(--hairline) solid var(--river-border);
+        border-radius: 10px;
+        box-shadow: 0 8px 24px rgba(61, 53, 41, 0.12);
+        z-index: 12;
+      }
+
+      .river-searchbar.is-hidden {
+        display: none !important;
+      }
+
+      .river-searchbar input {
+        flex: 1;
+        min-width: 0;
+        height: 28px;
+        padding: 0 8px;
+        border: var(--hairline) solid var(--river-border);
+        border-radius: 6px;
+        background: var(--river-bg);
+        color: var(--river-fg);
+        font-size: 13px;
+      }
+
+      .river-searchbar button {
+        height: 28px;
+        padding: 0 10px;
+        border: var(--hairline) solid var(--river-border);
+        border-radius: 6px;
+        background: var(--river-pane-bg);
+        color: var(--river-fg);
+        font-size: 12px;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .river-searchbar__count {
+        font-size: 11px;
+        font-family: ui-monospace, monospace;
+        color: var(--river-muted);
+        white-space: nowrap;
+      }
+
+      /* ── Responsive header — wrap at 900/640 like scribe toolbar ── */
+      @media (max-width: 900px) {
+        #river-rate {
+          width: 96px;
+        }
+        #river-progress {
+          display: none;
+        }
+      }
+
       @media (max-width: 640px) {
         #river-ribbon {
           display: none;
         }
         #river-header {
-          padding: 0 12px;
+          padding: 0 10px;
+          gap: 6px;
+          flex-wrap: wrap;
+          height: auto;
+          min-height: 44px;
+          padding-top: 6px;
+          padding-bottom: 6px;
         }
         #river-header h1 {
           font-size: 14px;
         }
+        #river-header button {
+          height: 28px;
+          padding: 0 8px;
+          font-size: 11px;
+        }
+        #river-rate {
+          width: 80px;
+        }
+        #river-rate-input {
+          width: 56px;
+        }
+        #river-fps {
+          display: none;
+        }
+        #river-stage {
+          --river-centered-gutter: 16px;
+        }
+      }
+
+      @media (max-width: 390px) {
+        #river-header {
+          padding: 6px 8px;
+        }
+        #river-rate-group {
+          gap: 4px;
+        }
       }
 
       @media (prefers-reduced-motion: reduce) {
-        #river-ribbon {
+        #river-ribbon,
+        .river-dropzone {
           transition: none;
         }
       }
@@ -227,15 +594,146 @@
       <div id="river-app">
         <header id="river-header">
           <h1>River</h1>
-          <span id="river-file-name">sample.md</span>
-          <span id="river-save-status">Ready</span>
-          <div id="river-controls" aria-label="Playback controls placeholder">
-            <span>Controls → CTX-0055</span>
+          <div id="river-header__left">
+            <button
+              id="river-open-file"
+              type="button"
+              title="Open file (.md, .txt)"
+            >
+              📂 File
+            </button>
+            <button id="river-play" type="button" title="Play (Space)">
+              ▶ Play
+            </button>
+            <button id="river-pause" type="button" title="Pause (Space)">
+              ⏸ Pause
+            </button>
+            <button id="river-stop" type="button" title="Clean (Esc)">
+              🧹 Clean
+            </button>
+            <button
+              id="river-loop"
+              type="button"
+              aria-pressed="false"
+              title="Loop (L)"
+            >
+              ↻ Loop
+            </button>
+            <div id="river-rate-group" role="group" aria-label="Token rate">
+              <label for="river-rate">Rate</label>
+              <input
+                id="river-rate"
+                type="range"
+                min="10"
+                max="2000"
+                step="10"
+                value="100"
+                aria-label="Token rate"
+              />
+              <input
+                id="river-rate-input"
+                type="number"
+                min="10"
+                max="2000"
+                step="10"
+                value="100"
+                aria-label="Token rate value"
+              />
+              <span>tok/s</span>
+            </div>
+            <span id="river-progress" aria-live="polite"></span>
+            <span id="river-fps" aria-live="off"></span>
+          </div>
+          <div id="river-header__right">
+            <label
+              for="river-theme-picker"
+              style="
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+              "
+              >Theme</label
+            >
+            <select id="river-theme-picker" aria-label="Theme">
+              <option value="warm">Warm light</option>
+              <option value="solarizedLight">Solarized Light</option>
+              <option value="githubLight">GitHub Light</option>
+            </select>
+            <span id="river-status" aria-live="polite">Ready</span>
+            <!-- compat: hidden file-name element for scaffold tests -->
+            <span id="river-file-name" hidden>sample.md</span>
+            <span id="river-save-status" hidden>Ready</span>
           </div>
         </header>
         <div id="river-stage">
           <canvas id="river-canvas"></canvas>
           <div id="river-a11y-root"></div>
+          <div
+            id="river-dropzone"
+            class="river-dropzone"
+            role="button"
+            tabindex="0"
+            aria-label="Open a Markdown or text file"
+          >
+            <div class="river-dropzone__card">
+              <div class="river-dropzone__icon">📄</div>
+              <div class="river-dropzone__title">Drop a file to stream</div>
+              <div class="river-dropzone__hint" id="river-dropzone-hint">
+                Markdown · plain text
+              </div>
+              <button
+                id="river-dropzone-btn"
+                class="river-dropzone__btn"
+                type="button"
+              >
+                Click to open file
+              </button>
+              <div class="river-dropzone__foot">
+                Supports drag &amp; drop · .md, .markdown, .txt
+              </div>
+            </div>
+          </div>
+          <div
+            id="river-searchbar"
+            class="river-searchbar is-hidden"
+            role="search"
+            aria-label="Find in document"
+          >
+            <input
+              id="river-search-input"
+              type="text"
+              placeholder="Find in document"
+              aria-label="Search query"
+            />
+            <span
+              id="river-search-count"
+              class="river-searchbar__count"
+              aria-live="polite"
+            ></span>
+            <button
+              id="river-search-prev"
+              type="button"
+              aria-label="Previous match"
+            >
+              ‹ Prev
+            </button>
+            <button
+              id="river-search-next"
+              type="button"
+              aria-label="Next match"
+            >
+              Next ›
+            </button>
+            <button
+              id="river-search-close"
+              type="button"
+              aria-label="Close search"
+            >
+              ✕
+            </button>
+          </div>
         </div>
       </div>
     </div>
